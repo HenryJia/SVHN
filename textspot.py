@@ -44,12 +44,12 @@ print 'Building models'
 
 def build_model(train = False):
     #input_layer_whole = Input(batch_shape = (batch_size, 3, 32, 32))
-    if train == False:
-        input_layer_glimpse = Input(batch_shape = (batch_size, None, 3, glimpse_size, glimpse_size))
-        input_layer_location = Input(batch_shape = (batch_size, None, 2, ))
-    else:
-        input_layer_glimpse = Input(shape = (None, 3, glimpse_size, glimpse_size))
-        input_layer_location = Input(shape = (None, 2, ))
+    #if train == False:
+    input_layer_glimpse = Input(batch_shape = (batch_size, None, 3, glimpse_size, glimpse_size))
+    input_layer_location = Input(batch_shape = (batch_size, None, 2, ))
+    #else:
+        #input_layer_glimpse = Input(shape = (None, 3, glimpse_size, glimpse_size))
+        #input_layer_location = Input(shape = (None, 2, ))
 
     conv = TimeDistributed(Convolution2D(16, 5, 5, border_mode = 'same', activation = 'linear'))(input_layer_glimpse)
     conv = LeakyReLU()(conv)
@@ -87,21 +87,27 @@ def build_model(train = False):
     fc_out_label = LeakyReLU()(fc_out_label)
     fc_out_label = TimeDistributed(Dense(10, activation = 'softmax'))(fc_out_label)
 
-    return Model(input = [input_layer_glimpse, input_layer_location], output = [fc_out_location, fc_out_label])
+    inputs = [input_layer_glimpse, input_layer_location]
+
+    if train == True:
+        selection_location = Input(batch_shape = (batch_size, None, 32, 32))
+        selection_label = Input(batch_shape = (batch_size, None, 10))
+        fc_out_location = merge([fc_out_location, selection_location], mode = 'mul')
+        fc_out_label = merge([fc_out_label, selection_label], mode = 'mul')
+        inputs += [selection_location, selection_label]
+
+    return Model(input = inputs, output = [fc_out_location, fc_out_label])
 
 def policy_search(reward, actions): #(y_true, y_pred)
-    selected = K.switch(K.equal(reward, 0), 0, 1) # Assume reward/penalty for 1 action at each timestep
-    selected_actions = K.clip(actions, 1e-8, 1 - 1e-8)  * selected # Clip for numerical stability
-
-    # Sum over feature axis then timesteps. Note we use a negative sign to turn maximisation into minimisation for Keras
-    axis = [i for i in xrange(1, len(actions._keras_shape))]
+    # Sum over feature axes. Note we use a negative sign to turn maximisation into minimisation for Keras
+    axis = [i for i in xrange(2, len(actions._keras_shape))]
     print axis
+    selected_actions = K.sum(actions, axis = axis)
 
-    selected_actions = K.sum(selected_actions, axis = axis[1:])
+    selected_actions = K.clip(selected_actions, 1e-8, 1 - 1e-8) # Clip for numerical stability
+    sum_logs = -K.sum(K.log(selected_actions), axis = 1)
 
-    sum_logs_t = -K.sum(K.log(selected_actions), axis = 1)
-
-    expectation = sum_logs_t * K.sum(reward, axis = tuple(axis)) / reward.shape[0] # Keras will sum over batch axis for us
+    expectation = sum_logs * K.sum(reward, axis = 1) / reward.shape[0] # Keras will sum over batch axis for us
     return expectation
 
 model_run = build_model(train = False) # We will use this one to run and generate a series of actions
@@ -123,19 +129,16 @@ print x_train.shape, y_train.shape
 
 print 'Training model'
 for j in xrange(epochs):
-
     reward_total = 0
     for k in xrange(0, x_train.shape[0], batch_size):
-
         if x_train.shape[0] - k < batch_size:
             break
 
         # Only need to store these for each batch
         x_batch_history = []
         location_history = []
-        #label_history = []
-        reward_label_history = []
-        reward_location_history = []
+        selected_label_history = []
+        selected_location_history = []
 
         x_train_cur = x_train[k:k + batch_size]
         y_train_cur = y_train[k:k + batch_size]
@@ -160,37 +163,44 @@ for j in xrange(epochs):
             locations = np.clip(locations, 0, img_size - glimpse_size)
 
             labels = np.argmax(label_actions, axis = 2)
-            #label_history += [labels]
-
-            # Allocate rewards for each action
-            reward = (labels == y_train_cur).astype(np.float32)
-            # Allocate the penalties - all non rewards are a penalty
-            reward[reward == 0] = -1e-8 # We want the penalty to be 0 but the code requires it to be non-0 so we use a small epsilon
 
             # Create reward arrays for the locations. This keeps track of actions chosen
             #print location_actions.shape, locations.shape
-            reward_locations = np.zeros_like(location_actions)
-            reward_labels = np.zeros_like(label_actions)
+            selected_locations = np.zeros_like(location_actions)
+            selected_labels = np.zeros_like(label_actions)
             for i in xrange(locations.shape[0]):
-                reward_locations[i, 0, locations[i, 0, 0], locations[i, 0, 1]] = reward[i]
-                reward_labels[i, 0, labels[i]] = reward[i]
-            reward_location_history += [reward_locations]
-            reward_label_history += [reward_labels]
+                selected_locations[i, 0, locations[i, 0, 0], locations[i, 0, 1]] = 1
+                selected_labels[i, 0, labels[i]] = 1
+            selected_location_history += [selected_locations]
+            selected_label_history += [selected_labels]
 
-        # We have the history of locations, and the history of rewards so we can train
+        # Allocate rewards for each action
+        reward = (labels == y_train_cur).astype(np.float32)
+
+        selected_locations = np.zeros_like(location_actions)
+        selected_labels = np.zeros_like(label_actions)
+        for i in xrange(locations.shape[0]):
+            selected_locations[i, 0, locations[i, 0, 0], locations[i, 0, 1]] = 1
+            selected_labels[i, 0, labels[i]] = 1
+        reward_location += [selected_locations]
+        reward_labe += [selected_labels]
+
+        # We have the history of locations, and the reward so we can train
         x_batch_history = np.concatenate(x_batch_history, axis = 1)
         location_history = np.concatenate(location_history, axis = 1)
-        reward_label_history = np.concatenate(reward_label_history, axis = 1)
-        reward_location_history = np.concatenate(reward_location_history, axis = 1)
-        #print x_batch_history.shape, location_history.shape, reward_label_history.shape, reward_location_history.shape
+        selected_label_history = np.concatenate(selected_label_history, axis = 1)
+        selected_location_history = np.concatenate(selected_location_history, axis = 1)
+        #print x_batch_history.shape, location_history.shape, selected_label_history.shape, selected_location_history.shape
 
         # Train on the training model
-        model_train.train_on_batch([x_batch_history, location_history], [reward_location_history, reward_label_history])
-        #print model_train.evaluate([x_batch_history, location_history], [reward_location_history, reward_label_history]), np.sum(reward_label_history)
-        reward_total += np.sum(reward_label_history)
+        model_train.train_on_batch([x_batch_history, location_history, selected_location_history, selected_label_history], [reward, reward])
+        #print model_train.evaluate([x_batch_history, location_history], [selected_location_history, selected_label_history]), np.sum(selected_label_history)
+        reward_total += np.sum(selected_label_history)
 
         # Update the weights of the run model
         model_run.set_weights(model_train.get_weights())
         #input()
+        if k == 0:
+            print "Training begun!"
 
     print reward_total / (x_train.shape[0] - x_train.shape[0] % batch_size)
