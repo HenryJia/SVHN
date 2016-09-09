@@ -32,18 +32,19 @@ import matplotlib.pyplot as plt
 
 from policy import epsilon_greedy
 
-batch_size = 32
+batch_size = 64
 glimpse_num = 8
 epochs = 100
 img_size = 32
 glimpse_size = 8
-epsilon = 0.1
-
+epsilon = 0.5
+epsilon_decay = 0.999
+epsilon_min = 0.1
 
 print 'Building models'
 
 def build_model(train = False):
-    #input_layer_whole = Input(batch_shape = (batch_size, 3, 32, 32))
+    #input_layer_whole = Input(batch_shape = (batch_size, 3, img_size, img_size))
     if train == False:
         input_layer_glimpse = Input(batch_shape = (batch_size, None, 3, glimpse_size, glimpse_size))
         input_layer_location = Input(batch_shape = (batch_size, None, 2, ))
@@ -80,8 +81,8 @@ def build_model(train = False):
 
     fc_out_location = TimeDistributed(Dense(200))(rnn2)
     fc_out_location = LeakyReLU()(fc_out_location)
-    fc_out_location = TimeDistributed(Dense(32 ** 2, activation = 'softmax'))(fc_out_location)
-    fc_out_location = TimeDistributed(Reshape((32, 32)))(fc_out_location)
+    fc_out_location = TimeDistributed(Dense(img_size ** 2, activation = 'softmax'))(fc_out_location)
+    fc_out_location = TimeDistributed(Reshape((img_size, img_size)))(fc_out_location)
 
     fc_out_label = TimeDistributed(Dense(200))(rnn1)
     fc_out_label = LeakyReLU()(fc_out_label)
@@ -172,8 +173,8 @@ for j in xrange(epochs):
             reward_locations = np.zeros_like(location_actions)
             reward_labels = np.zeros_like(label_actions)
             for i in xrange(locations.shape[0]):
-                reward_locations[i, 0, locations[i, 0, 0], locations[i, 0, 1]] = reward[i]
-                reward_labels[i, 0, labels[i]] = reward[i]
+                reward_locations[i, 0, locations[i, 0, 0], locations[i, 0, 1]] = reward[i] if t == glimpse_num - 1 else -1e-8
+                reward_labels[i, 0, labels[i]] = reward[i] if t == glimpse_num - 1 else -1e-8
             reward_location_history += [reward_locations]
             reward_label_history += [reward_labels]
 
@@ -187,10 +188,11 @@ for j in xrange(epochs):
         # Train on the training model
         model_train.train_on_batch([x_batch_history, location_history], [reward_location_history, reward_label_history])
         #print model_train.evaluate([x_batch_history, location_history], [reward_location_history, reward_label_history]), np.sum(reward_label_history)
-        reward_total += np.sum(reward_label_history)
+        reward_total += np.sum(reward_label_history[:, -1])
 
         # Update the weights of the run model
         model_run.set_weights(model_train.get_weights())
+        epsilon *= epsilon_decay if epsilon < epsilon_min else 1
         #input()
 
-    print reward_total / (x_train.shape[0] - x_train.shape[0] % batch_size)
+    print reward_total / ((x_train.shape[0] - x_train.shape[0] % batch_size))
