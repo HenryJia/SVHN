@@ -39,7 +39,7 @@ img_size = 32
 glimpse_size = 8
 epsilon = 0.5
 epsilon_decay = 0.999
-epsilon_min = 0.1
+epsilon_min = 0.2
 
 print 'Building models'
 
@@ -98,11 +98,12 @@ def policy_search(reward, actions): #(y_true, y_pred)
     axis = [i for i in xrange(1, len(actions._keras_shape))]
     print axis
 
-    selected_actions = K.sum(selected_actions, axis = axis[1:])
+    sum_logs_t = -K.log(K.sum(selected_actions, axis = axis[1:]))
 
-    sum_logs_t = -K.sum(K.log(selected_actions), axis = 1)
+    reward_low_var = K.sum(reward, axis = axis[1:])
+    reward_low_var = K.sum(reward_low_var, axis = 1, keepdims = True) - K.mean(reward_low_var, axis = 0, keepdims = True)
 
-    expectation = sum_logs_t * K.sum(reward, axis = tuple(axis)) / reward.shape[0] # Keras will sum over batch axis for us
+    expectation = K.sum(sum_logs_t * reward_low_var, axis = 1) / reward.shape[0] # Keras will sum over batch axis for us
     return expectation
 
 model_run = build_model(train = False) # We will use this one to run and generate a series of actions
@@ -194,5 +195,7 @@ for j in xrange(epochs):
         model_run.set_weights(model_train.get_weights())
         epsilon *= epsilon_decay if epsilon < epsilon_min else 1
         #input()
+        if k == 0 and j == 0:
+            print 'Training started'
 
     print reward_total / ((x_train.shape[0] - x_train.shape[0] % batch_size))
