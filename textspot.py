@@ -102,7 +102,7 @@ def policy_search(reward, actions): #(y_true, y_pred)
 
     sum_logs_t = -K.sum(K.log(selected_actions), axis = 1)
 
-    expectation = sum_logs_t * K.sum(reward, axis = tuple(axis)) / reward.shape[0] # Keras will sum over batch axis for us
+    expectation = sum_logs_t * K.sum(reward, axis = tuple(axis)) # Keras will mean over batch axis for us
     return expectation
 
 model_run = build_model(train = False) # We will use this one to run and generate a series of actions
@@ -198,4 +198,5 @@ for j in xrange(epochs):
         model_run.set_weights(model_train.get_weights())
     epsilon *= epsilon_decay if epsilon < epsilon_min else 1
 
+    print model_train.evaluate([x_batch_history, location_history], [reward_location_history, reward_label_history])
     print reward_total / ((x_train.shape[0] - x_train.shape[0] % batch_size))
