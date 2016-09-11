@@ -34,7 +34,7 @@ from policy import epsilon_greedy, softmax_policy
 
 batch_size = 64
 glimpse_num = 8
-epochs = 100
+epochs = 5
 img_size = 32
 glimpse_size = 8
 epsilon = 0.5
@@ -140,6 +140,8 @@ for j in xrange(epochs):
 
         x_train_cur = x_train[k:k + batch_size]
         y_train_cur = y_train[k:k + batch_size]
+
+        model_run.reset_states()
         for t in xrange(glimpse_num):
             locations = np.random.random_integers(low = 0, high = img_size - glimpse_size - 1, size = (batch_size, 1, 2)) if t == 0 else locations # Initialise locations if necessary
             location_history += [locations] # Add it to the history
