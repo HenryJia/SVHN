@@ -30,7 +30,7 @@ from keras.engine import Layer, InputSpec
 
 import matplotlib.pyplot as plt
 
-from policy import epsilon_greedy
+from policy import epsilon_greedy, softmax_policy
 
 batch_size = 64
 glimpse_num = 8
@@ -152,8 +152,10 @@ for j in xrange(epochs):
             # Run the model to get actions
             actions = model_run.predict_on_batch([x_batch, locations])
             # Apply greedy epsilon policy to introduce stochasticness
-            location_actions = epsilon_greedy(epsilon, actions[0])
-            label_actions = epsilon_greedy(epsilon, actions[1])
+            #location_actions = epsilon_greedy(epsilon, actions[0])
+            #label_actions = epsilon_greedy(epsilon, actions[1])
+            location_actions = softmax_policy(actions[0])
+            label_actions = softmax_policy(actions[1])
 
             # Get the final actions
             for i in xrange(locations.shape[0]):
@@ -192,7 +194,6 @@ for j in xrange(epochs):
 
         # Update the weights of the run model
         model_run.set_weights(model_train.get_weights())
-        epsilon *= epsilon_decay if epsilon < epsilon_min else 1
-        #input()
+    epsilon *= epsilon_decay if epsilon < epsilon_min else 1
 
     print reward_total / ((x_train.shape[0] - x_train.shape[0] % batch_size))
